@@ -4,7 +4,7 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="DriveLearning.vcxproj">
+  <Project Path="DriveLearning.vcxproj" Id="952bf5ae-1bc4-4813-9ee3-f6c74201452a">
     <Deploy />
   </Project>
 </Solution>
