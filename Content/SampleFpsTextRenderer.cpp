@@ -8,33 +8,82 @@ using namespace Microsoft::WRL;
 
 // Initializes D2D resources used for text rendering.
 SampleFpsTextRenderer::SampleFpsTextRenderer(const std::shared_ptr<DX::DeviceResources>& deviceResources) : 
-	m_text(L""),
+	m_blinkTimer(0.0f),
+	m_showStartPrompt(true),
+	m_titleText(L"DRIVE LEARNING"),
+	m_subtitleText(L"Learn math and spelling while you drive."),
+	m_startPromptText(L"Press A to Start"),
+	m_menuText(L"New Game    |    How to Play    |    Settings"),
 	m_deviceResources(deviceResources)
 {
-	ZeroMemory(&m_textMetrics, sizeof(DWRITE_TEXT_METRICS));
+	// Create device-independent resources.
+	ComPtr<IDWriteTextFormat> titleFormat;
+	DX::ThrowIfFailed(
+		m_deviceResources->GetDWriteFactory()->CreateTextFormat(
+			L"Segoe UI Black",
+			nullptr,
+			DWRITE_FONT_WEIGHT_HEAVY,
+			DWRITE_FONT_STYLE_NORMAL,
+			DWRITE_FONT_STRETCH_NORMAL,
+			72.0f,
+			L"en-US",
+			&titleFormat
+			)
+		);
+	DX::ThrowIfFailed(titleFormat.As(&m_titleFormat));
+	DX::ThrowIfFailed(m_titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER));
+	DX::ThrowIfFailed(m_titleFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR));
 
-	// Create device independent resources
-	ComPtr<IDWriteTextFormat> textFormat;
+	ComPtr<IDWriteTextFormat> subtitleFormat;
 	DX::ThrowIfFailed(
 		m_deviceResources->GetDWriteFactory()->CreateTextFormat(
 			L"Segoe UI",
 			nullptr,
-			DWRITE_FONT_WEIGHT_LIGHT,
+			DWRITE_FONT_WEIGHT_SEMI_LIGHT,
 			DWRITE_FONT_STYLE_NORMAL,
 			DWRITE_FONT_STRETCH_NORMAL,
-			32.0f,
+			30.0f,
 			L"en-US",
-			&textFormat
+			&subtitleFormat
 			)
 		);
+	DX::ThrowIfFailed(subtitleFormat.As(&m_subtitleFormat));
+	DX::ThrowIfFailed(m_subtitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER));
+	DX::ThrowIfFailed(m_subtitleFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR));
 
+	ComPtr<IDWriteTextFormat> promptFormat;
 	DX::ThrowIfFailed(
-		textFormat.As(&m_textFormat)
+		m_deviceResources->GetDWriteFactory()->CreateTextFormat(
+			L"Segoe UI Semibold",
+			nullptr,
+			DWRITE_FONT_WEIGHT_SEMI_BOLD,
+			DWRITE_FONT_STYLE_NORMAL,
+			DWRITE_FONT_STRETCH_NORMAL,
+			36.0f,
+			L"en-US",
+			&promptFormat
+			)
 		);
+	DX::ThrowIfFailed(promptFormat.As(&m_promptFormat));
+	DX::ThrowIfFailed(m_promptFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER));
+	DX::ThrowIfFailed(m_promptFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR));
 
+	ComPtr<IDWriteTextFormat> menuFormat;
 	DX::ThrowIfFailed(
-		m_textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)
+		m_deviceResources->GetDWriteFactory()->CreateTextFormat(
+			L"Segoe UI",
+			nullptr,
+			DWRITE_FONT_WEIGHT_NORMAL,
+			DWRITE_FONT_STYLE_NORMAL,
+			DWRITE_FONT_STRETCH_NORMAL,
+			24.0f,
+			L"en-US",
+			&menuFormat
+			)
 		);
+	DX::ThrowIfFailed(menuFormat.As(&m_menuFormat));
+	DX::ThrowIfFailed(m_menuFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER));
+	DX::ThrowIfFailed(m_menuFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR));
 
 	DX::ThrowIfFailed(
 		m_deviceResources->GetD2DFactory()->CreateDrawingStateBlock(&m_stateBlock)
@@ -46,30 +95,12 @@ SampleFpsTextRenderer::SampleFpsTextRenderer(const std::shared_ptr<DX::DeviceRes
 // Updates the text to be displayed.
 void SampleFpsTextRenderer::Update(DX::StepTimer const& timer)
 {
-	// Update display text.
-	uint32 fps = timer.GetFramesPerSecond();
-
-	m_text = (fps > 0) ? std::to_wstring(fps) + L" FPS" : L" - FPS";
-
-	ComPtr<IDWriteTextLayout> textLayout;
-	DX::ThrowIfFailed(
-		m_deviceResources->GetDWriteFactory()->CreateTextLayout(
-			m_text.c_str(),
-			(uint32) m_text.length(),
-			m_textFormat.Get(),
-			240.0f, // Max width of the input text.
-			50.0f, // Max height of the input text.
-			&textLayout
-			)
-		);
-
-	DX::ThrowIfFailed(
-		textLayout.As(&m_textLayout)
-		);
-
-	DX::ThrowIfFailed(
-		m_textLayout->GetMetrics(&m_textMetrics)
-		);
+	m_blinkTimer += static_cast<float>(timer.GetElapsedSeconds());
+	if (m_blinkTimer >= 0.6f)
+	{
+		m_showStartPrompt = !m_showStartPrompt;
+		m_blinkTimer = 0.0f;
+	}
 }
 
 // Renders a frame to the screen.
@@ -80,24 +111,50 @@ void SampleFpsTextRenderer::Render()
 
 	context->SaveDrawingState(m_stateBlock.Get());
 	context->BeginDraw();
+	context->SetTransform(m_deviceResources->GetOrientationTransform2D());
 
-	// Position on the bottom right corner
-	D2D1::Matrix3x2F screenTranslation = D2D1::Matrix3x2F::Translation(
-		logicalSize.Width - m_textMetrics.layoutWidth,
-		logicalSize.Height - m_textMetrics.height
+	const float width = logicalSize.Width;
+	const float height = logicalSize.Height;
+
+	const D2D1_RECT_F titleRect = D2D1::RectF(0.0f, height * 0.16f, width, height * 0.36f);
+	const D2D1_RECT_F subtitleRect = D2D1::RectF(0.0f, height * 0.37f, width, height * 0.48f);
+	const D2D1_RECT_F startPromptRect = D2D1::RectF(0.0f, height * 0.58f, width, height * 0.68f);
+	const D2D1_RECT_F menuRect = D2D1::RectF(0.0f, height * 0.80f, width, height * 0.88f);
+
+	context->DrawText(
+		m_titleText.c_str(),
+		static_cast<UINT32>(m_titleText.length()),
+		m_titleFormat.Get(),
+		titleRect,
+		m_titleBrush.Get()
+	);
+
+	context->DrawText(
+		m_subtitleText.c_str(),
+		static_cast<UINT32>(m_subtitleText.length()),
+		m_subtitleFormat.Get(),
+		subtitleRect,
+		m_bodyBrush.Get()
+	);
+
+	if (m_showStartPrompt)
+	{
+		context->DrawText(
+			m_startPromptText.c_str(),
+			static_cast<UINT32>(m_startPromptText.length()),
+			m_promptFormat.Get(),
+			startPromptRect,
+			m_accentBrush.Get()
 		);
+	}
 
-	context->SetTransform(screenTranslation * m_deviceResources->GetOrientationTransform2D());
-
-	DX::ThrowIfFailed(
-		m_textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)
-		);
-
-	context->DrawTextLayout(
-		D2D1::Point2F(0.f, 0.f),
-		m_textLayout.Get(),
-		m_whiteBrush.Get()
-		);
+	context->DrawText(
+		m_menuText.c_str(),
+		static_cast<UINT32>(m_menuText.length()),
+		m_menuFormat.Get(),
+		menuRect,
+		m_bodyBrush.Get()
+	);
 
 	// Ignore D2DERR_RECREATE_TARGET here. This error indicates that the device
 	// is lost. It will be handled during the next call to Present.
@@ -113,10 +170,26 @@ void SampleFpsTextRenderer::Render()
 void SampleFpsTextRenderer::CreateDeviceDependentResources()
 {
 	DX::ThrowIfFailed(
-		m_deviceResources->GetD2DDeviceContext()->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &m_whiteBrush)
+		m_deviceResources->GetD2DDeviceContext()->CreateSolidColorBrush(
+			D2D1::ColorF(0.95f, 0.96f, 0.99f, 1.0f),
+			&m_titleBrush)
+		);
+
+	DX::ThrowIfFailed(
+		m_deviceResources->GetD2DDeviceContext()->CreateSolidColorBrush(
+			D2D1::ColorF(0.86f, 0.90f, 0.97f, 1.0f),
+			&m_bodyBrush)
+		);
+
+	DX::ThrowIfFailed(
+		m_deviceResources->GetD2DDeviceContext()->CreateSolidColorBrush(
+			D2D1::ColorF(0.17f, 0.75f, 1.0f, 1.0f),
+			&m_accentBrush)
 		);
 }
 void SampleFpsTextRenderer::ReleaseDeviceDependentResources()
 {
-	m_whiteBrush.Reset();
+	m_titleBrush.Reset();
+	m_bodyBrush.Reset();
+	m_accentBrush.Reset();
 }
